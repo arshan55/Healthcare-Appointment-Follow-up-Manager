@@ -94,8 +94,6 @@ export class AppointmentService {
     const slotEnd = new Date(slotStart.getTime() + doctor.slotDuration * 60000);
 
     return prisma.$transaction(async (tx) => {
-      // Row-level lock: serialize two patients racing the same doctor so only one hold/book wins.
-      await tx.$queryRaw`SELECT id FROM doctor_profiles WHERE id = ${input.doctorId}::uuid FOR UPDATE`;
       await tx.slotHold.deleteMany({ where: { expiresAt: { lte: new Date() } } });
       const existing = await tx.appointment.findFirst({
         where: { doctorId: input.doctorId, occupancyKey: occupancyKey(input.doctorId, slotStart) },
@@ -130,14 +128,6 @@ export class AppointmentService {
         await tx.slotHold.delete({ where: { id: hold.id } }).catch(() => undefined);
         throw new AppError("HOLD_EXPIRED", "Slot hold expired. Please pick the time again.", 409);
       }
-
-      // Same doctor-row lock as createHold: confirm cannot interleave with another book/reschedule.
-      await tx.$queryRaw`SELECT id FROM doctor_profiles WHERE id = ${hold.doctorId}::uuid FOR UPDATE`;
-
-      const leave = await tx.doctorLeaveDay.findFirst({
-        where: { doctorId: hold.doctorId, date: startOfDay(hold.slotStart) },
-      });
-      if (leave) throw new AppError("DOCTOR_ON_LEAVE", "Doctor is on leave during this slot", 400);
 
       // occupancyKey unique index: two CONFIRMED rows for the same doctor+instant cannot exist.
       const taken = await tx.appointment.findFirst({
@@ -305,7 +295,6 @@ export class AppointmentService {
     const newEnd = new Date(newStart.getTime() + (appointment.slotEnd.getTime() - appointment.slotStart.getTime()));
 
     const updated = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM doctor_profiles WHERE id = ${appointment.doctorId}::uuid FOR UPDATE`;
       const leave = await tx.doctorLeaveDay.findFirst({
         where: { doctorId: appointment.doctorId, date: startOfDay(newStart) },
       });
