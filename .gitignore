@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+out/
+.env
+.env.local
+.DS_Store
+.idea/
+.vscode/
+coverage/
+*.log
+npm-debug.log
+pnpm-lock.yaml
+yarn.lock
+*.zip
+postgresql-*-windows-x64-binaries.zip
