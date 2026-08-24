@@ -1,0 +1,17 @@
+{
+  "name": "healthcare-appointments",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev -w hc-backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "test": "npm run test -w hc-backend",
+    "db:up": "docker compose up -d",
+    "db:migrate": "npm run migrate -w hc-backend",
+    "db:seed": "npm run seed -w hc-backend"
+  }
+}
