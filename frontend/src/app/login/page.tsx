@@ -34,6 +34,8 @@ export default function LoginPage() {
     }
   }
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--paper)] px-6 py-10">
       <div className="animate-in w-full max-w-md rounded-[8px] border border-[var(--line)] bg-white p-6 shadow-[var(--shadow)]">
@@ -53,7 +55,7 @@ export default function LoginPage() {
       </form>
       <div className="mt-6">
         <a
-          href="/auth/google"
+          href={`${apiBase}/auth/google`}
           className="inline-flex w-full items-center justify-center gap-2 rounded-[8px] border border-[var(--line)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--ink)] transition hover:bg-[var(--surface-strong)]"
         >
           <svg width="18" height="18" viewBox="0 0 24 24">
