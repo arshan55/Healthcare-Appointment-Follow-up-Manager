@@ -43,6 +43,9 @@ router.get(
       scope: ["openid", "profile", "email"],
       state,
     });
+    if (!url || url.includes("undefined")) {
+      throw new AppError("GOOGLE_AUTH_DISABLED", "Google OAuth credentials are incomplete", 400);
+    }
     res.redirect(url);
   })
 );
@@ -84,6 +87,16 @@ router.get(
           name,
           password: await require("bcrypt").hash(googleId, 10),
           role: "PATIENT",
+        },
+      });
+    } else if (!user.googleAccessToken && !user.googleRefreshToken) {
+      // Existing user without Google tokens - update their Google tokens for calendar
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          googleAccessToken: tokens.access_token || undefined,
+          googleRefreshToken: tokens.refresh_token || undefined,
+          googleTokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
         },
       });
     }

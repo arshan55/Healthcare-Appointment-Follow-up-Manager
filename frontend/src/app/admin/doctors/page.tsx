@@ -56,6 +56,19 @@ export default function AdminDoctorsPage() {
     setLeaveReason("");
   }
 
+  async function deleteDoctor(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    if (!confirm(`Delete Dr. ${selected.user.name}? This cannot be undone.`)) return;
+    try {
+      await api.deleteDoctor(selected.id);
+      setSelected(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader title="Doctors" subtitle="Profiles, hours, and leave. Leave on a booked day flags those visits." />
@@ -98,7 +111,12 @@ export default function AdminDoctorsPage() {
             <Field label="Reason">
               <input value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} />
             </Field>
-            <Button type="submit">Mark leave</Button>
+            <div className="flex gap-3">
+              <Button type="submit">Mark leave</Button>
+              <Button type="button" variant="danger" onClick={deleteDoctor}>
+                Delete doctor
+              </Button>
+            </div>
           </form>
         </Card>
       ) : null}
