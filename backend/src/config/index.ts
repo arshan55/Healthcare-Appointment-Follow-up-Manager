@@ -14,6 +14,7 @@ export const config = {
   emailSmtpPort: parseInt(process.env.EMAIL_SMTP_PORT || "587", 10),
   emailSmtpUser: process.env.EMAIL_SMTP_USER || "",
   emailSmtpPass: process.env.EMAIL_SMTP_PASS || "",
+  sendgridApiKey: process.env.SENDGRID_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM_ADDRESS || "noreply@healthcare.local",
   googleClientId: process.env.GOOGLE_CLIENT_ID || "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || "",

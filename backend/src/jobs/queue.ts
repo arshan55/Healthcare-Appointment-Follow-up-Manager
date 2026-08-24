@@ -7,8 +7,13 @@ import { getEmailService } from "../services/emailService";
 
 type JobName = "pre-visit-summary" | "post-visit-summary" | "send-email-retry";
 
+// Support both redis:// and rediss:// (TLS) for Upstash, Redis Cloud, etc.
 const connection = config.redisUrl
-  ? new IORedis(config.redisUrl, { maxRetriesPerRequest: null })
+  ? new IORedis(config.redisUrl, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      tls: config.redisUrl.startsWith("rediss://") ? {} : undefined,
+    })
   : null;
 
 const defaultJobOpts: JobsOptions = {

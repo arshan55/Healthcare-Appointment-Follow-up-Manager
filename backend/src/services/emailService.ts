@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import sgMail from "@sendgrid/mail";
 import prisma from "../prismaClient";
 import { config } from "../config";
 import { withBackoff } from "../utils/retry";
@@ -18,6 +19,84 @@ async function logEmail(to: string, subject: string, body: string, success: bool
   await prisma.emailLog.create({
     data: { to, subject, body, success, error, attempts: 1 },
   });
+}
+
+export class SendGridEmailService implements EmailService {
+  constructor() {
+    if (config.sendgridApiKey) {
+      sgMail.setApiKey(config.sendgridApiKey);
+    }
+  }
+
+  async send(to: string, subject: string, body: string): Promise<void> {
+    try {
+      await withBackoff(() =>
+        sgMail.send({
+          to,
+          from: config.emailFrom,
+          subject,
+          html: body,
+        })
+      );
+      await logEmail(to, subject, body, true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      await logEmail(to, subject, body, false, message);
+      throw error;
+    }
+  }
+
+  async sendBookingConfirmation(email: string, doctorName: string, slotStart: Date) {
+    await this.send(
+      email,
+      "Appointment confirmed",
+      `<p>Your visit with ${doctorName} is confirmed for ${slotStart.toLocaleString()}.</p>`
+    );
+  }
+
+  async sendReschedule(email: string, doctorName: string, slotStart: Date) {
+    await this.send(
+      email,
+      "Appointment rescheduled",
+      `<p>Your visit with ${doctorName} was moved to ${slotStart.toLocaleString()}.</p>`
+    );
+  }
+
+  async sendCancellation(email: string, doctorName: string) {
+    await this.send(email, "Appointment cancelled", `<p>Your visit with ${doctorName} was cancelled.</p>`);
+  }
+
+  async sendReminder(email: string, doctorName: string, slotStart: Date) {
+    await this.send(
+      email,
+      "Appointment reminder",
+      `<p>Reminder: visit with ${doctorName} at ${slotStart.toLocaleString()}.</p>`
+    );
+  }
+
+  async sendMedicationReminder(email: string, medication: string, dosage: string) {
+    await this.send(
+      email,
+      "Medication reminder",
+      `<p>Time to take ${medication} (${dosage}).</p>`
+    );
+  }
+
+  async sendLeaveNotification(email: string, reason: string) {
+    await this.send(
+      email,
+      "Your visit needs to be rescheduled",
+      `<p>Your doctor is unavailable (${reason}). Please pick a new time in the patient portal.</p>`
+    );
+  }
+
+  async sendSummaryPending(email: string, kind: string) {
+    await this.send(
+      email,
+      `${kind} summary not ready`,
+      `<p>The ${kind} summary could not be generated automatically. It will be available after regeneration.</p>`
+    );
+  }
 }
 
 export class NodemailerEmailService implements EmailService {
@@ -130,8 +209,11 @@ export class ConsoleEmailService implements EmailService {
 }
 
 export function getEmailService(): EmailService {
-  if (config.nodeEnv === "test" || !config.emailSmtpHost) {
+  if (config.nodeEnv === "test" || (!config.sendgridApiKey && !config.emailSmtpHost)) {
     return new ConsoleEmailService();
+  }
+  if (config.sendgridApiKey) {
+    return new SendGridEmailService();
   }
   return new NodemailerEmailService();
 }
