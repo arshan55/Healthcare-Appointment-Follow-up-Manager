@@ -210,11 +210,14 @@ export class ConsoleEmailService implements EmailService {
 
 export function getEmailService(): EmailService {
   if (config.nodeEnv === "test" || (!config.sendgridApiKey && !config.emailSmtpHost)) {
+    console.log("[email] Using console logger (no provider configured)");
     return new ConsoleEmailService();
   }
   if (config.sendgridApiKey) {
+    console.log("[email] Using SendGrid provider");
     return new SendGridEmailService();
   }
+  console.log("[email] Using SMTP provider:", config.emailSmtpHost);
   return new NodemailerEmailService();
 }
 
