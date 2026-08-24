@@ -2,6 +2,8 @@
 
 A production-quality platform with three portals — **Patient**, **Doctor**, and **Admin** — for booking appointments, sharing symptoms, generating AI visit summaries, and managing follow-ups with email and Google Calendar integration.
 
+**Live URL:** https://frontend-xi-woad-63.vercel.app/
+
 ---
 
 ## Tech Stack
@@ -13,8 +15,8 @@ A production-quality platform with three portals — **Patient**, **Doctor**, an
 | Database | PostgreSQL 16 | ACID guarantees required for concurrency-safe booking |
 | ORM | Prisma 5 | Type-safe queries, migrations, excellent DX |
 | Auth | JWT + bcrypt | Stateless, role-based, no session store required |
-| LLM | Google Gemini API (gemini-2.0-flash) behind service interface | Swappable implementation; mock fallback for tests |
-| Email | Nodemailer + retry/backoff | Service interface; falls back to console logging when SMTP is unconfigured |
+| LLM | Google Gemini API (gemini-3.6-flash) behind service interface | Swappable implementation; mock fallback for tests |
+| Email | SendGrid API + Nodemailer SMTP fallback | Service interface; falls back to console logging when unconfigured |
 | Calendar | Google Calendar API (OAuth 2.0) | Patient/doctor calendar event creation, update, delete |
 | Background jobs | BullMQ + Redis (or in-process fallback) | Reliable queue with retries; degrades gracefully without Redis |
 | Testing | Jest + ts-jest | Unit and integration tests with coverage reporting |
@@ -90,76 +92,167 @@ See `backend/.env.example` for the full reference. Key variables:
 | `REDIS_URL` | No | BullMQ connection (jobs run in-process if empty) |
 | `SLOT_HOLD_MINUTES` | No | Hold expiry before confirmation (default `10`) |
 | `LLM_API_KEY` | No | Google AI Studio key (mock service used if empty) |
+| `SENDGRID_API_KEY` | No | SendGrid API key for email delivery |
 | `EMAIL_SMTP_HOST` | No | SMTP host (console logger used if empty) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | Calendar OAuth (calendar writes skipped if empty) |
+| `GOOGLE_AUTH_CLIENT_ID` / `GOOGLE_AUTH_CLIENT_SECRET` | No | Google login OAuth (falls back to Calendar credentials) |
 
 ---
 
 ## API Documentation
 
-All endpoints are prefixed with `/api/v1`.
-
-### Auth
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/auth/register` | Register patient (`email`, `password`, `name`) |
-| POST | `/auth/login` | Login (`email`, `password`) |
-| GET | `/auth/me` | Current user (requires token) |
-
-### Doctors
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/doctors` | List doctors (`?specialization=`) |
-| GET | `/doctors/:id` | Doctor profile |
-| GET | `/doctors/:id/slots` | Available slots for a date (`?date=`) |
-| PATCH | `/doctors/:id` | Update profile (doctor/admin) |
-
-### Appointments
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/appointments/holds` | Create a slot hold (patient) |
-| POST | `/appointments/book` | Book from hold or direct book (patient) |
-| GET | `/appointments` | List for current user |
-| GET | `/appointments/:id` | Appointment detail |
-| POST | `/appointments/:id/cancel` | Cancel appointment |
-| POST | `/appointments/:id/reschedule` | Reschedule (`slotStart`) |
-| POST | `/appointments/:id/post-visit-notes` | Submit notes + prescription (doctor) |
-| GET | `/appointments/:id/pre-visit` | Pre-visit summary |
-| GET | `/appointments/:id/post-visit` | Post-visit summary |
-| POST | `/appointments/:id/pre-visit/regenerate` | Regenerate pre-visit summary |
-| POST | `/appointments/:id/post-visit/regenerate` | Regenerate post-visit summary |
-
-### Admin
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/admin/users` | All users |
-| GET | `/admin/appointments` | All appointments |
-| GET | `/admin/doctors` | All doctors |
-| POST | `/admin/doctors` | Create doctor |
-| PATCH | `/admin/doctors/:id` | Update doctor |
-| DELETE | `/admin/doctors/:id` | Delete doctor |
-| POST | `/admin/doctors/:id/leave` | Mark leave for a date |
-| DELETE | `/admin/doctors/leave/:leaveDayId` | Remove leave day |
-| GET | `/admin/statistics` | Counts |
-
-### Calendar
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/calendar/connect` | Get Google OAuth URL |
-| GET | `/calendar/callback` | OAuth callback |
-
-### Error shape
-
-All errors return:
-
+All endpoints are prefixed with `/api/v1`. All responses are JSON. Errors follow the shape:
 ```json
 { "error": { "code": "ERROR_CODE", "message": "Human readable message" } }
 ```
+
+### Auth
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/auth/register` | No | Register patient |
+| POST | `/auth/login` | No | Login |
+| GET | `/auth/google` | No | Get Google OAuth URL |
+| GET | `/auth/google/callback` | No | Google OAuth callback |
+| GET | `/auth/me` | Yes | Current user |
+
+**POST /auth/register**
+```json
+// Request
+{ "email": "user@example.com", "password": "Password123", "name": "John Doe" }
+
+// Response 201
+{ "user": { "id": "uuid", "email": "user@example.com", "role": "PATIENT", "name": "John Doe" }, "token": "jwt.token.here" }
+```
+
+**POST /auth/login**
+```json
+// Request
+{ "email": "user@example.com", "password": "Password123" }
+
+// Response 200
+{ "user": { "id": "uuid", "email": "user@example.com", "role": "PATIENT", "name": "John Doe" }, "token": "jwt.token.here" }
+```
+
+**GET /auth/me**
+```json
+// Response 200
+{ "user": { "id": "uuid", "email": "user@example.com", "role": "PATIENT", "name": "John Doe", "calendarConnected": false, "doctorProfileId": null } }
+```
+
+### Doctors
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/doctors` | Yes | List doctors (`?specialization=`) |
+| GET | `/doctors/:id` | Yes | Doctor profile |
+| GET | `/appointments/available-slots` | Yes | Available slots (`?doctorId=&date=`) |
+
+**GET `/doctors?specialization=Cardiology`**
+```json
+// Response 200
+{ "doctors": [{ "id": "uuid", "specialization": "Cardiology", "slotDuration": 30, "workingHours": { "monday": ["09:00", "17:00"] }, "user": { "id": "uuid", "email": "dr@example.com", "name": "Dr. Smith" } }] }
+```
+
+**GET `/appointments/available-slots?doctorId=uuid&date=2026-08-25`**
+```json
+// Response 200
+{ "slots": [{ "start": "2026-08-25T09:00:00.000Z", "end": "2026-08-25T09:30:00.000Z" }] }
+```
+
+### Appointments
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/appointments/holds` | Patient | Create a slot hold |
+| POST | `/appointments/book` | Patient | Book from hold or direct book |
+| GET | `/appointments` | Yes | List for current user |
+| GET | `/appointments/:id` | Yes | Appointment detail |
+| POST | `/appointments/:id/cancel` | Yes | Cancel appointment |
+| POST | `/appointments/:id/reschedule` | Yes | Reschedule |
+| POST | `/appointments/:id/post-visit-notes` | Doctor | Submit notes + prescription |
+| GET | `/appointments/:id/pre-visit` | Yes | Pre-visit summary |
+| GET | `/appointments/:id/post-visit` | Yes | Post-visit summary |
+| POST | `/appointments/:id/pre-visit/regenerate` | Doctor/Admin | Regenerate pre-visit summary |
+| POST | `/appointments/:id/post-visit/regenerate` | Doctor/Admin | Regenerate post-visit summary |
+
+**POST /appointments/holds**
+```json
+// Request
+{ "doctorId": "uuid", "slotStart": "2026-08-25T09:00:00.000Z" }
+
+// Response 201
+{ "hold": { "id": "uuid", "expiresAt": "2026-08-25T08:40:00.000Z" } }
+```
+
+**POST /appointments/book**
+```json
+// Request (from hold)
+{ "holdId": "uuid", "symptoms": "Chest pain and shortness of breath for 3 days..." }
+
+// Request (direct book)
+{ "doctorId": "uuid", "slotStart": "2026-08-25T09:00:00.000Z", "symptoms": "Chest pain..." }
+
+// Response 201
+{ "appointment": { "id": "uuid", "status": "CONFIRMED", "occupancyKey": "doctorId:slotStart", "slotStart": "...", "slotEnd": "...", "patient": { "id": "uuid", "email": "...", "name": "..." }, "doctor": { "id": "uuid", "user": { "name": "Dr. Smith" } }, "symptomForm": { "symptoms": "..." }, "preVisit": { "status": "PENDING" } } }
+```
+
+**POST /appointments/:id/post-visit-notes**
+```json
+// Request
+{ "notes": "Diagnosed with costochondritis...", "medication": "Ibuprofen", "dosage": "400mg", "frequency": "three times daily for 7 days" }
+
+// Response 200
+{ "note": { "id": "uuid", "appointmentId": "uuid", "notes": "..." } }
+```
+
+**POST /appointments/:id/reschedule**
+```json
+// Request
+{ "slotStart": "2026-08-26T10:00:00.000Z" }
+
+// Response 200
+{ "appointment": { "id": "uuid", "status": "CONFIRMED", "slotStart": "..." } }
+```
+
+### Admin
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/users` | Admin | All users |
+| GET | `/admin/appointments` | Admin | All appointments |
+| GET | `/admin/doctors` | Admin | All doctors |
+| POST | `/admin/doctors` | Admin | Create doctor |
+| PATCH | `/admin/doctors/:id` | Admin | Update doctor |
+| DELETE | `/admin/doctors/:id` | Admin | Delete doctor |
+| POST | `/admin/doctors/:id/leave` | Admin | Mark leave for a date |
+| DELETE | `/admin/doctors/leave/:leaveDayId` | Admin | Remove leave day |
+| GET | `/admin/statistics` | Admin | Counts |
+
+**POST /admin/doctors**
+```json
+// Request
+{ "email": "dr@example.com", "password": "Password123", "name": "Dr. Smith", "specialization": "Cardiology", "slotDuration": 30, "workingHours": { "monday": ["09:00", "17:00"], "tuesday": ["09:00", "17:00"] } }
+
+// Response 201
+{ "doctor": { "id": "uuid", "email": "dr@example.com", "name": "Dr. Smith", "role": "DOCTOR", "doctorProfile": { "id": "uuid", "specialization": "Cardiology", "slotDuration": 30 } } }
+```
+
+**POST /admin/doctors/:id/leave**
+```json
+// Request
+{ "date": "2026-08-26", "reason": "Conference" }
+
+// Response 201
+{ "leaveDay": { "id": "uuid", "doctorId": "uuid", "date": "2026-08-26T00:00:00.000Z", "reason": "Conference" } }
+```
+
+### Calendar
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/calendar/connect` | Yes | Get Google OAuth URL |
+| GET | `/calendar/callback` | No | OAuth callback |
 
 ---
 
@@ -169,7 +262,7 @@ All errors return:
 
 | Table | Purpose |
 |-------|---------|
-| `users` | All accounts (patient / doctor / admin). Passwords bcrypt-hashed. |
+| `users` | All accounts (patient / doctor / admin). Passwords bcrypt-hashed. Google OAuth tokens stored here. |
 | `doctor_profiles` | Specialisation, slot duration, working hours JSON. |
 | `doctor_leave_days` | Per-doctor leave dates (unique on `doctorId + date`). |
 | `appointments` | Bookings with status enum. `occupancyKey` unique while active to prevent double-booking. |
@@ -182,6 +275,7 @@ All errors return:
 | `medication_reminders` | Scheduled reminder timestamps with retry tracking. |
 | `email_logs` | Every email attempt and outcome. |
 | `calendar_events` | Google Calendar event IDs per appointment. |
+| `outbox_events` | Outbox pattern for reliable email delivery. |
 
 ### Indexes
 
@@ -190,6 +284,15 @@ All errors return:
 - `slot_holds(doctorId, slotStart)` — unique, prevents concurrent holds
 - `slot_holds(expiresAt)` — fast expiry cleanup
 - `medication_reminders(remindAt, sent)` — fast reminder job queries
+- `outbox_events(status, createdAt)` — fast outbox processing queries
+
+### Enums
+
+```sql
+ROLE: PATIENT | DOCTOR | ADMIN
+APPOINTMENT_STATUS: HELD | CONFIRMED | CANCELLED | COMPLETED | CANCELLED_DUE_TO_LEAVE | NEEDS_RESCHEDULE
+SUMMARY_STATUS: PENDING | READY | FAILED
+```
 
 ---
 
@@ -213,7 +316,11 @@ Return ONLY valid JSON:
 {"summary":"string","medication_schedule":[{"medication":"name","dosage":"amount","frequency":"timing","duration":"days"}],"follow_up_steps":["step"]}
 ```
 
-Both prompts are behind a service interface (`src/services/llmService.ts`). If the API key is missing or the environment is `test`, a deterministic `MockLLMService` is used.
+Both prompts:
+- Mandate structured JSON output
+- Forbid markdown wrappers (plain JSON only)
+- Are validated with Zod schemas (`PreVisitSchema`, `PostVisitSchema`)
+- Include fallback: if LLM fails or hallucinates, the summary is marked `FAILED` and the user is notified
 
 Get a free Gemini API key at https://aistudio.google.com/app/apikey
 
@@ -226,6 +333,8 @@ Get a free Gemini API key at https://aistudio.google.com/app/apikey
 3. Create OAuth 2.0 credentials (Web application).
 4. Add authorized redirect URI: `https://your-backend/api/v1/calendar/callback`.
 5. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALENDAR_REDIRECT_URI` in `backend/.env`.
+6. For Google Login, also set `GOOGLE_AUTH_CLIENT_ID`, `GOOGLE_AUTH_CLIENT_SECRET`, and `GOOGLE_AUTH_REDIRECT_URI` (or leave empty to fall back to Calendar credentials).
+7. **Important:** Add test users in **APIs & Services** → **OAuth consent screen** → **Test users** while in Testing mode.
 
 Calendar failures are caught and logged; they never block booking or other flows.
 
@@ -250,11 +359,13 @@ Coverage includes:
 
 ## Design Decisions
 
-- **Double-booking prevention:** A unique `occupancyKey` on active appointments plus a row-level `FOR UPDATE` lock inside a Prisma transaction serializes concurrent holds/books for the same doctor and time.
+- **Double-booking prevention:** A unique `occupancyKey` on active appointments plus a unique `(doctorId, slotStart)` constraint on slot_holds prevents concurrent bookings. The unique index causes one transaction to fail with a constraint error, which we catch and translate to a `409 SLOT_TAKEN` response.
 - **Slot hold mechanism:** A `slot_holds` table with a unique `(doctorId, slotStart)` constraint and TTL `expiresAt` lets a patient reserve a slot for 10 minutes before confirming. Expired holds are cleaned up by a background job and lazily on read.
-- **Doctor leave conflict handling:** When an admin marks leave, a background-style handler flips affected active appointments to `NEEDS_RESCHEDULE`, clears their `occupancyKey`, deletes calendar events, and emails the patient.
+- **Doctor leave conflict handling:** When an admin marks leave, a background job (BullMQ) processes affected appointments asynchronously, flipping them to `NEEDS_RESCHEDULE`, clearing their `occupancyKey`, deleting calendar events, and emailing patients via the outbox pattern.
+- **Outbox Pattern:** Email notifications are published to an `outbox_events` table and processed by a background worker, ensuring reliable delivery even if the email service is temporarily unavailable.
+- **Idempotency:** Google Calendar event creation includes an idempotency check to prevent duplicate events if the job is retried.
 - **LLM failure handling:** LLM calls are wrapped in exponential backoff (3 attempts). On final failure, the summary is marked `FAILED`, the booking/visit is not rolled back, and the relevant party is notified by email.
-- **Notification failure handling:** All email sends use a retry-with-backoff layer. Failures are logged to `email_logs` with error details. The caller flow (booking, cancellation, leave) never blocks on email success.
+- **Notification failure handling:** All email sends use a retry-with-backoff layer. Failures are logged to `email_logs` with error details. The caller flow never blocks on email success.
 
 ---
 
@@ -297,16 +408,16 @@ HealthCare/
     src/
       config/             # Env-based configuration
       jobs/               # BullMQ queue + background workers
-      middleware/         # Auth + role guards
-      routes/             # Express routers
-      services/           # Business logic (appointment, auth, doctor, LLM, email, calendar)
-      utils/              # Slots, retry, LLM parsing, medication scheduling
-      index.ts            # App entry
-    tests/                # Jest tests
+      middleware/          # Auth + role guards
+      routes/              # Express routers
+      services/            # Business logic (appointment, auth, doctor, LLM, email, calendar, outbox)
+      utils/               # Slots, retry, LLM parsing, medication scheduling
+      index.ts             # App entry
+    tests/                 # Jest tests
   frontend/
     src/
-      app/                # Next.js App Router pages
-      components/         # Shared UI (PortalShell, Button, Card, StatusBadge)
-      contexts/           # Auth context
-      lib/                # API client, types
+      app/                 # Next.js App Router pages
+      components/          # Shared UI (PortalShell, Button, Card, StatusBadge, ScrollReveal)
+      contexts/            # Auth context
+      lib/                 # API client, types
 ```
