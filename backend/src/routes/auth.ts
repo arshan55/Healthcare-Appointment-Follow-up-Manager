@@ -54,12 +54,23 @@ router.get(
   "/google/callback",
   asyncHandler(async (req, res) => {
     const code = String(req.query.code || "");
-    const state = String(req.query.state || "");
+    const error = String(req.query.error || "");
+    if (error) {
+      throw new AppError("GOOGLE_AUTH_FAILED", `Google auth error: ${error}`, 400);
+    }
     if (!code) {
       throw new AppError("INVALID_INPUT", "Missing authorization code", 400);
     }
 
-    const { tokens } = await googleClient.getToken(code);
+    let tokens;
+    try {
+      const result = await googleClient.getToken(code);
+      tokens = result.tokens;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Token exchange failed";
+      throw new AppError("GOOGLE_AUTH_FAILED", `Token exchange failed: ${msg}`, 400);
+    }
+
     const idToken = tokens.id_token;
     if (!idToken) {
       throw new AppError("GOOGLE_AUTH_FAILED", "No ID token from Google", 400);
@@ -90,7 +101,6 @@ router.get(
         },
       });
     } else if (!user.googleAccessToken && !user.googleRefreshToken) {
-      // Existing user without Google tokens - update their Google tokens for calendar
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -102,7 +112,8 @@ router.get(
     }
 
     const token = authService.generateToken(user);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+    const redirectUrl = `${config.frontendUrl.replace(/\/$/, "")}/auth/callback?token=${encodeURIComponent(token)}`;
+    res.redirect(redirectUrl);
   })
 );
 

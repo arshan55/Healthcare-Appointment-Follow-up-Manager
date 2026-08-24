@@ -40,7 +40,7 @@ router.get(
         googleTokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
       },
     });
-    res.redirect(`${config.frontendUrl}/settings/calendar?connected=1`);
+    res.redirect(`${config.frontendUrl.replace(/\/$/, "")}/settings/calendar?connected=1`);
   })
 );
 
