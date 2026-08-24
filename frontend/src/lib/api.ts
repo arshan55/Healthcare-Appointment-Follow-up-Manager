@@ -279,6 +279,8 @@ export const api = {
   deleteDoctor: (id: string) => request<void>(`/admin/doctors/${id}`, { method: "DELETE" }),
   addLeave: (doctorId: string, date: string, reason?: string) =>
     request<{ leaveDay: unknown }>(`/admin/doctors/${doctorId}/leave`, { method: "POST", body: JSON.stringify({ date, reason }) }),
+  updateUserRole: (userId: string, role: string) =>
+    request<{ user: User }>(`/admin/users/${userId}/role`, { method: "PATCH", body: JSON.stringify({ role }) }),
 };
 
 export default api;

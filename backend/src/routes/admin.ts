@@ -82,6 +82,19 @@ router.delete(
   })
 );
 
+router.patch(
+  "/users/:userId/role",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const body = z.object({ role: z.enum(["PATIENT", "DOCTOR", "ADMIN"]) }).parse(req.body);
+    const user = await prisma.user.update({
+      where: { id: req.params.userId },
+      data: { role: body.role },
+      select: { id: true, email: true, name: true, role: true },
+    });
+    res.json({ user });
+  })
+);
+
 router.get(
   "/statistics",
   asyncHandler(async (_req, res) => {

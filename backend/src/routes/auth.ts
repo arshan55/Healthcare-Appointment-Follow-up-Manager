@@ -1,10 +1,18 @@
 import { Router } from "express";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
 import authService from "../services/authService";
-import { asyncHandler } from "../utils/errorHandler";
+import { asyncHandler, AppError } from "../utils/errorHandler";
 import prisma from "../prismaClient";
+import { config } from "../config";
+import { OAuth2Client } from "google-auth-library";
 
 const router = Router();
+
+const googleClient = new OAuth2Client(
+  config.googleAuthClientId,
+  config.googleAuthClientSecret,
+  config.googleAuthRedirectUri
+);
 
 router.post(
   "/register",
@@ -19,6 +27,69 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await authService.login(req.body);
     res.json(result);
+  })
+);
+
+router.get(
+  "/google",
+  asyncHandler(async (_req, res) => {
+    if (!config.googleAuthClientId) {
+      throw new AppError("GOOGLE_AUTH_DISABLED", "Google login is not configured", 400);
+    }
+    const state = Buffer.from(JSON.stringify({ nonce: Date.now().toString() })).toString("base64url");
+    const url = googleClient.generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent",
+      scope: ["openid", "profile", "email"],
+      state,
+    });
+    res.redirect(url);
+  })
+);
+
+router.get(
+  "/google/callback",
+  asyncHandler(async (req, res) => {
+    const code = String(req.query.code || "");
+    const state = String(req.query.state || "");
+    if (!code) {
+      throw new AppError("INVALID_INPUT", "Missing authorization code", 400);
+    }
+
+    const { tokens } = await googleClient.getToken(code);
+    const idToken = tokens.id_token;
+    if (!idToken) {
+      throw new AppError("GOOGLE_AUTH_FAILED", "No ID token from Google", 400);
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: config.googleAuthClientId,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload?.email || !payload?.email_verified) {
+      throw new AppError("GOOGLE_AUTH_FAILED", "Email not verified with Google", 400);
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email.toLowerCase();
+    const name = payload.name || email.split("@")[0];
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          password: await require("bcrypt").hash(googleId, 10),
+          role: "PATIENT",
+        },
+      });
+    }
+
+    const token = authService.generateToken(user);
+    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   })
 );
 

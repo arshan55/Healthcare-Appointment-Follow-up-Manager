@@ -1,7 +1,7 @@
-import axios from "axios";
 import { config } from "../config";
 import { parsePostVisit, parsePreVisit, PostVisitParsed, PreVisitParsed } from "../utils/llmParse";
 import { withBackoff } from "../utils/retry";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export interface LLMService {
   generatePreVisit(symptoms: string): Promise<PreVisitParsed>;
@@ -20,7 +20,20 @@ const POST_PROMPT = (notes: string) =>
 Return ONLY valid JSON:
 {"summary":"string","medication_schedule":[{"medication":"name","dosage":"amount","frequency":"timing","duration":"days"}],"follow_up_steps":["step"]}`;
 
-export class OpenAIService implements LLMService {
+export class GeminiService implements LLMService {
+  private client: GoogleGenerativeAI | null = null;
+  private model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]> | null = null;
+
+  private ensureClient() {
+    if (!this.client) {
+      this.client = new GoogleGenerativeAI(config.llmApiKey);
+    }
+    if (!this.model) {
+      this.model = this.client.getGenerativeModel({ model: config.llmModel });
+    }
+    return this.model;
+  }
+
   async generatePreVisit(symptoms: string): Promise<PreVisitParsed> {
     const content = await this.complete(PRE_PROMPT(symptoms));
     return parsePreVisit(content);
@@ -34,26 +47,12 @@ export class OpenAIService implements LLMService {
   private async complete(prompt: string): Promise<string> {
     // LLM failure handling: exponential backoff, then the caller records FAILED (booking is not rolled back).
     return withBackoff(async () => {
-      const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: config.llmModel,
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 800,
-          temperature: 0.3,
-          response_format: { type: "json_object" },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${config.llmApiKey}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 30000,
-        }
-      );
-      const content = response.data?.choices?.[0]?.message?.content;
-      if (!content) throw new Error("No content in LLM response");
-      return content as string;
+      const model = this.ensureClient();
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      if (!text) throw new Error("No content in LLM response");
+      return text.trim();
     });
   }
 }
@@ -86,7 +85,7 @@ export function getLLMService(): LLMService {
   if (config.nodeEnv === "test" || !config.llmApiKey) {
     return new MockLLMService();
   }
-  return new OpenAIService();
+  return new GeminiService();
 }
 
 export default getLLMService();

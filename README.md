@@ -13,7 +13,7 @@ A production-quality platform with three portals — **Patient**, **Doctor**, an
 | Database | PostgreSQL 16 | ACID guarantees required for concurrency-safe booking |
 | ORM | Prisma 5 | Type-safe queries, migrations, excellent DX |
 | Auth | JWT + bcrypt | Stateless, role-based, no session store required |
-| LLM | OpenAI API (gpt-4o-mini) behind service interface | Swappable implementation; mock fallback for tests |
+| LLM | Google Gemini API (gemini-2.0-flash) behind service interface | Swappable implementation; mock fallback for tests |
 | Email | Nodemailer + retry/backoff | Service interface; falls back to console logging when SMTP is unconfigured |
 | Calendar | Google Calendar API (OAuth 2.0) | Patient/doctor calendar event creation, update, delete |
 | Background jobs | BullMQ + Redis (or in-process fallback) | Reliable queue with retries; degrades gracefully without Redis |
@@ -89,7 +89,7 @@ See `backend/.env.example` for the full reference. Key variables:
 | `FRONTEND_URL` | No | Allowed CORS origin (default `http://localhost:3000`) |
 | `REDIS_URL` | No | BullMQ connection (jobs run in-process if empty) |
 | `SLOT_HOLD_MINUTES` | No | Hold expiry before confirmation (default `10`) |
-| `LLM_API_KEY` | No | OpenAI key (mock service used if empty) |
+| `LLM_API_KEY` | No | Google AI Studio key (mock service used if empty) |
 | `EMAIL_SMTP_HOST` | No | SMTP host (console logger used if empty) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | Calendar OAuth (calendar writes skipped if empty) |
 
@@ -214,6 +214,8 @@ Return ONLY valid JSON:
 ```
 
 Both prompts are behind a service interface (`src/services/llmService.ts`). If the API key is missing or the environment is `test`, a deterministic `MockLLMService` is used.
+
+Get a free Gemini API key at https://aistudio.google.com/app/apikey
 
 ---
 
