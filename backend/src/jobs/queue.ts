@@ -10,21 +10,13 @@ import { processOutboxEvents } from "../services/outboxService";
 type JobName = "pre-visit-summary" | "post-visit-summary" | "send-email-retry" | "leave-conflict";
 
 // Support both redis:// and rediss:// (TLS) for Upstash, Redis Cloud, etc.
-// If the URL is invalid, fall back to in-process jobs instead of crashing.
-let connection: IORedis | null = null;
-try {
-  if (config.redisUrl) {
-    connection = new IORedis(config.redisUrl, {
+const connection = config.redisUrl
+  ? new IORedis(config.redisUrl, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
       tls: config.redisUrl.startsWith("rediss://") ? {} : undefined,
-    });
-    console.log("Redis connection established");
-  }
-} catch (err) {
-  console.error("Invalid REDIS_URL, falling back to in-process jobs:", err instanceof Error ? err.message : err);
-  connection = null;
-}
+    })
+  : null;
 
 const defaultJobOpts: JobsOptions = {
   attempts: 3,
