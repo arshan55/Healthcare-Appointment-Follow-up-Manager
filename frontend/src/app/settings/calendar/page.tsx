@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 import { Button, Card, PageHeader } from "@/components/ui";
 import { Suspense } from "react";
+import PortalShell from "@/components/PortalShell";
 
 function CalendarInner() {
   const { user, refresh } = useAuth();
@@ -27,23 +28,27 @@ function CalendarInner() {
     }
   }
 
+  const role = user?.role || "PATIENT";
+
   return (
-    <div className="max-w-lg">
-      <PageHeader title="Google Calendar" subtitle="Optional. Booking still works if you skip this." />
-      <Card className="p-5">
-        <p className="text-sm text-[var(--muted)]">
-          {connected
-            ? "This account is connected. New visits will be written to Google Calendar when possible."
-            : "Connect your calendar so confirmed visits appear as events. Failures are logged and never block booking."}
-        </p>
-        {error ? <p className="mt-3 text-sm text-[var(--red)]">{error}</p> : null}
-        <div className="mt-4">
-          <Button type="button" onClick={connect}>
-            Connect Google Calendar
-          </Button>
-        </div>
-      </Card>
-    </div>
+    <PortalShell role={role}>
+      <div className="max-w-lg">
+        <PageHeader title="Google Calendar" subtitle="Optional. Booking still works if you skip this." />
+        <Card className="p-5">
+          <p className="text-sm text-[var(--muted)]">
+            {connected
+              ? "This account is connected. New visits will be written to Google Calendar when possible."
+              : "Connect your calendar so confirmed visits appear as events. Failures are logged and never block booking."}
+          </p>
+          {error ? <p className="mt-3 text-sm text-[var(--accent)]">{error}</p> : null}
+          <div className="mt-4">
+            <Button type="button" onClick={connect}>
+              Connect Google Calendar
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </PortalShell>
   );
 }
 

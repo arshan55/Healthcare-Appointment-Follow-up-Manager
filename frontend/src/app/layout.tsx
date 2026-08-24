@@ -9,6 +9,9 @@ const display = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-displa
 export const metadata: Metadata = {
   title: "Northwell Clinic",
   description: "Appointments, visit summaries, and follow-up",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
