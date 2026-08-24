@@ -58,6 +58,13 @@ export class GoogleCalendarService implements CalendarService {
     patientId: string;
     doctorUserId: string;
   }) {
+    // Idempotency check: skip if events already exist for this appointment
+    const existing = await prisma.calendarEvent.findUnique({
+      where: { appointmentId: params.appointmentId },
+    });
+    if (existing?.patientEventId && existing?.doctorEventId) {
+      return; // Events already created, skip duplicate
+    }
     try {
       const body = {
         summary: params.summary,

@@ -227,3 +227,17 @@ model CalendarEvent {
 
   @@map("calendar_events")
 }
+
+model OutboxEvent {
+  id          String   @id @default(uuid())
+  eventType   String
+  payload     Json
+  status      String   @default("PENDING")
+  attempts    Int      @default(0)
+  lastError   String?
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([status, createdAt])
+  @@map("outbox_events")
+}

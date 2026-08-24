@@ -2,10 +2,12 @@ import { Queue, Worker, JobsOptions } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "../config";
 import appointmentService from "../services/appointmentService";
+import doctorService from "../services/doctorService";
 import prisma from "../prismaClient";
 import { getEmailService } from "../services/emailService";
+import { processOutboxEvents } from "../services/outboxService";
 
-type JobName = "pre-visit-summary" | "post-visit-summary" | "send-email-retry";
+type JobName = "pre-visit-summary" | "post-visit-summary" | "send-email-retry" | "leave-conflict";
 
 // Support both redis:// and rediss:// (TLS) for Upstash, Redis Cloud, etc.
 const connection = config.redisUrl
@@ -25,13 +27,13 @@ const defaultJobOpts: JobsOptions = {
 
 const queue = connection ? new Queue("healthcare", { connection, defaultJobOptions: defaultJobOpts }) : null;
 
-const localHandlers: Record<string, (data: Record<string, string>) => Promise<void>> = {};
-
 async function handleJob(name: string, data: Record<string, string>) {
   if (name === "pre-visit-summary") {
     await appointmentService.generatePreVisit(data.appointmentId, data.symptoms);
   } else if (name === "post-visit-summary") {
     await appointmentService.generatePostVisit(data.appointmentId, data.notes);
+  } else if (name === "leave-conflict") {
+    await doctorService.handleLeaveConflicts(data.doctorId, new Date(data.date), data.reason);
   }
 }
 
@@ -63,6 +65,7 @@ export function startBackgroundJobs() {
     await cleanupHolds();
     await sendAppointmentReminders();
     await sendMedicationReminders();
+    await processOutboxEvents();
   };
   void tick();
   setInterval(() => void tick(), 5 * 60 * 1000);
@@ -118,5 +121,3 @@ async function sendMedicationReminders() {
     }
   }
 }
-
-void localHandlers;

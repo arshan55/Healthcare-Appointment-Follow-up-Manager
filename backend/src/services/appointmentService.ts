@@ -9,6 +9,7 @@ import { getLLMService } from "./llmService";
 import { getEmailService } from "./emailService";
 import { getCalendarService } from "./calendarService";
 import { enqueueJob } from "../jobs/queue";
+import { publishEvent } from "./outboxService";
 
 const HoldSchema = z.object({
   doctorId: z.string().uuid(),
@@ -169,21 +170,23 @@ export class AppointmentService {
       include: appointmentInclude,
     });
     if (!appointment) return;
-    const email = getEmailService();
-    const calendar = getCalendarService();
     const doctorName = appointment.doctor.user.name;
 
-    await email
-      .sendBookingConfirmation(appointment.patient.email, doctorName, appointment.slotStart)
-      .catch((err) => console.error("Booking email failed", err));
-    await email
-      .send(
-        appointment.doctor.user.email,
-        "New appointment scheduled",
-        `<p>${appointment.patient.name} booked ${appointment.slotStart.toLocaleString()}.</p>`
-      )
-      .catch((err) => console.error("Doctor booking email failed", err));
+    // Publish email events to outbox for reliable delivery
+    await publishEvent("booking-confirmation-patient", {
+      to: appointment.patient.email,
+      subject: "Appointment confirmed",
+      body: `<p>Your visit with ${doctorName} is confirmed for ${appointment.slotStart.toLocaleString()}.</p>`,
+      type: "booking-confirmation-patient",
+    });
+    await publishEvent("booking-confirmation-doctor", {
+      to: appointment.doctor.user.email,
+      subject: "New appointment scheduled",
+      body: `<p>${appointment.patient.name} booked ${appointment.slotStart.toLocaleString()}.</p>`,
+      type: "booking-confirmation-doctor",
+    });
 
+    const calendar = getCalendarService();
     await calendar.createEvents({
       appointmentId,
       summary: `Visit: ${appointment.patient.name} / ${doctorName}`,
@@ -222,9 +225,12 @@ export class AppointmentService {
         include: { doctor: { include: { user: true } } },
       });
       if (apt) {
-        await getEmailService()
-          .sendSummaryPending(apt.doctor.user.email, "pre-visit")
-          .catch(() => undefined);
+        await publishEvent("summary-pending", {
+          to: apt.doctor.user.email,
+          subject: "pre-visit summary not ready",
+          body: `<p>The pre-visit summary could not be generated automatically. It will be available after regeneration.</p>`,
+          type: "summary-pending",
+        }).catch(() => undefined);
       }
     }
   }
@@ -264,9 +270,12 @@ export class AppointmentService {
         include: { patient: true },
       });
       if (apt) {
-        await getEmailService()
-          .sendSummaryPending(apt.patient.email, "post-visit")
-          .catch(() => undefined);
+        await publishEvent("summary-pending", {
+          to: apt.patient.email,
+          subject: "post-visit summary not ready",
+          body: `<p>The post-visit summary could not be generated automatically. It will be available after regeneration.</p>`,
+          type: "summary-pending",
+        }).catch(() => undefined);
       }
     }
   }
@@ -282,9 +291,13 @@ export class AppointmentService {
       include: appointmentInclude,
     });
     await getCalendarService().deleteEvents(appointmentId);
-    await getEmailService()
-      .sendCancellation(updated.patient.email, updated.doctor.user.name)
-      .catch((err) => console.error(err));
+    // Publish cancellation email to outbox
+    await publishEvent("cancellation", {
+      to: updated.patient.email,
+      subject: "Appointment cancelled",
+      body: `<p>Your visit with ${updated.doctor.user.name} was cancelled.</p>`,
+      type: "cancellation",
+    }).catch((err) => console.error("Outbox publish failed", err));
     return updated;
   }
 
@@ -319,9 +332,13 @@ export class AppointmentService {
     });
 
     await getCalendarService().updateEvents(appointmentId, updated.slotStart, updated.slotEnd);
-    await getEmailService()
-      .sendReschedule(updated.patient.email, updated.doctor.user.name, updated.slotStart)
-      .catch((err) => console.error(err));
+    // Publish reschedule email to outbox
+    await publishEvent("reschedule", {
+      to: updated.patient.email,
+      subject: "Appointment rescheduled",
+      body: `<p>Your visit with ${updated.doctor.user.name} was moved to ${updated.slotStart.toLocaleString()}.</p>`,
+      type: "reschedule",
+    }).catch((err) => console.error("Outbox publish failed", err));
     return updated;
   }
 

@@ -5,6 +5,8 @@ import { AppError } from "../utils/errorHandler";
 import { endOfDay, startOfDay } from "../utils/slots";
 import { getEmailService } from "./emailService";
 import { getCalendarService } from "./calendarService";
+import { enqueueJob } from "../jobs/queue";
+import { publishEvent } from "./outboxService";
 
 const WorkingHoursSchema = z.record(z.tuple([z.string(), z.string()]));
 
@@ -107,7 +109,8 @@ export class DoctorService {
       create: { doctorId, date: day, reason },
       update: { reason },
     });
-    await this.handleLeaveConflicts(doctorId, day, reason || "Doctor on leave");
+    // Enqueue background job for leave conflict handling (async processing)
+    await enqueueJob("leave-conflict", { doctorId, date: day.toISOString(), reason: reason || "Doctor on leave" });
     return leave;
   }
 
@@ -141,9 +144,13 @@ export class DoctorService {
         data: { status: "NEEDS_RESCHEDULE", occupancyKey: null },
       });
       await calendar.deleteEvents(appointment.id).catch(() => undefined);
-      await email
-        .sendLeaveNotification(appointment.patient.email, reason)
-        .catch((err) => console.error("Leave email failed", err));
+      // Publish leave notification to outbox for reliable delivery
+      await publishEvent("leave-notification", {
+        to: appointment.patient.email,
+        subject: "Your visit needs to be rescheduled",
+        body: `<p>Your doctor is unavailable (${reason}). Please pick a new time in the patient portal.</p>`,
+        type: "leave-notification",
+      }).catch((err) => console.error("Outbox publish failed", err));
     }
     return affected.length;
   }
