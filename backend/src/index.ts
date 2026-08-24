@@ -15,7 +15,7 @@ import { startBackgroundJobs } from "./jobs/backgroundJobs";
 dotenv.config();
 
 const app = express();
-app.use(cors({ origin: config.frontendUrl, credentials: true }));
+app.use(cors({ origin: config.frontendUrl.replace(/\/$/, ""), credentials: true }));
 app.use(express.json());
 
 app.use("/api/v1/health", healthRouter);
